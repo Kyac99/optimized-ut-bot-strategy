@@ -58,9 +58,7 @@ sell = src < xATRTrailingStop and below and shortFilter
 pointValue = 5  // Value of one point for Mini Dow Jones futures
 riskPerTrade = 0.001 * totalCapital  // 0.1% of total capital for each trade
 positionSize = riskPerTrade / (nLoss * pointValue)  // Number of contracts based on risk per trade and ATR-based stop loss
-
-// Ensure position size is at least 1 contract
-positionSize = positionSize < 1 ? 1 : positionSize
+positionSize := positionSize < 1 ? 1 : positionSize  // Ensure position size is at least 1 contract
 
 // Plot Buy and Sell Signals
 plotshape(buy, title='Buy', text='Buy', style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), textcolor=color.new(color.white, 0), size=size.tiny)
