@@ -1,0 +1,100 @@
+//@version=5
+strategy(title='UT Bot Strategy Optimisée', overlay=true)
+
+// Inputs
+a = input(7, title='Key Value. \'This changes the sensitivity\'')
+c = input(1, title='ATR Period')
+h = input(false, title='Signals from Heikin Ashi Candles')
+totalCapital = input(1000000, title='Total Capital')  // Input for total capital
+
+// Inputs pour les filtres horaires et DMI/ADX
+startHour = input(8, title='Heure de début de trading')
+endHour = input(20, title='Heure de fin de trading')
+adxPeriod = input(14, title='Période ADX')
+adxThreshold = input(15, title='Seuil ADX')
+diPeriod = input(14, title='Période DI')
+
+// Déterminer si l'heure actuelle est dans la plage de trading
+isWithinTradingHours() =>
+    time_hour = hour(time)
+    time_hour >= startHour and time_hour < endHour
+
+// Calculer DMI et ADX
+[diplus, diminus, adx] = ta.dmi(diPeriod, adxPeriod)
+
+// Filtres de trading
+longFilter = adx > adxThreshold and diplus > diminus and isWithinTradingHours()
+shortFilter = adx > adxThreshold and diminus > diplus and isWithinTradingHours()
+
+// Calculate ATR
+xATR = ta.atr(c)
+nLoss = a * xATR
+
+// Use Heikin Ashi close if selected
+src = h ? request.security(ticker.heikinashi(syminfo.tickerid), timeframe.period, close, lookahead=barmerge.lookahead_off) : close
+
+// Calculate ATR Trailing Stop
+var float xATRTrailingStop = na
+iff_1 = src > nz(xATRTrailingStop[1], 0) ? src - nLoss : src + nLoss
+iff_2 = src < nz(xATRTrailingStop[1], 0) and src[1] < nz(xATRTrailingStop[1], 0) ? math.min(nz(xATRTrailingStop[1]), src + nLoss) : iff_1
+xATRTrailingStop := src > nz(xATRTrailingStop[1], 0) and src[1] > nz(xATRTrailingStop[1], 0) ? math.max(nz(xATRTrailingStop[1]), src - nLoss) : iff_2
+
+// Determine Position
+var int pos = na
+iff_3 = src[1] > nz(xATRTrailingStop[1], 0) and src < nz(xATRTrailingStop[1], 0) ? -1 : nz(pos[1], 0)
+pos := src[1] < nz(xATRTrailingStop[1], 0) and src > nz(xATRTrailingStop[1], 0) ? 1 : iff_3
+
+xcolor = pos == -1 ? color.red : pos == 1 ? color.green : color.blue
+
+ema = ta.ema(src, 1)
+above = ta.crossover(ema, xATRTrailingStop)
+below = ta.crossover(xATRTrailingStop, ema)
+
+// Signaux d'origine avec nouveaux filtres
+buy = src > xATRTrailingStop and above and longFilter
+sell = src < xATRTrailingStop and below and shortFilter
+
+// Calculate position size for Mini Dow Jones futures
+pointValue = 5  // Value of one point for Mini Dow Jones futures
+riskPerTrade = 0.001 * totalCapital  // 0.1% of total capital for each trade
+positionSize = riskPerTrade / (nLoss * pointValue)  // Number of contracts based on risk per trade and ATR-based stop loss
+
+// Ensure position size is at least 1 contract
+positionSize = positionSize < 1 ? 1 : positionSize
+
+// Plot Buy and Sell Signals
+plotshape(buy, title='Buy', text='Buy', style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+plotshape(sell, title='Sell', text='Sell', style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+
+// Afficher les indicateurs DMI et ADX pour le débogage
+plotchar(adx > adxThreshold, title="ADX > Threshold", char="✓", color=color.green, location=location.top)
+plotchar(diplus > diminus, title="DI+ > DI-", char="L", color=color.green, location=location.top)
+plotchar(diminus > diplus, title="DI- > DI+", char="S", color=color.red, location=location.top)
+plotchar(isWithinTradingHours(), title="Trading Hours", char="H", color=color.blue, location=location.top)
+
+// Strategy Implementation
+if (buy)
+    strategy.entry("Long", strategy.long, qty=positionSize, stop=(close - 3 * xATR))
+
+if (sell)
+    strategy.entry("Short", strategy.short, qty=positionSize, stop=(close + 3 * xATR))
+
+// Close conditions for opposite signals
+if (sell)
+    strategy.close("Long")
+
+if (buy)
+    strategy.close("Short")
+
+// Plot trailing stop for visualization
+plot(xATRTrailingStop, title='ATR Trailing Stop', color=xcolor, linewidth=2)
+
+// Plot DMI and ADX for reference
+plot(adx, title="ADX", color=color.yellow, linewidth=2)
+plot(diplus, title="DI+", color=color.green, linewidth=1)
+plot(diminus, title="DI-", color=color.red, linewidth=1)
+hline(adxThreshold, title="ADX Threshold", color=color.white, linestyle=hline.style_dotted)
+
+// Alerts
+alertcondition(buy, title='UT Long', message='UT Long')
+alertcondition(sell, title='UT Short', message='UT Short')
