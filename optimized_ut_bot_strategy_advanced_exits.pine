@@ -81,6 +81,22 @@ var float takeProfitPrice = na
 var float breakEvenStopPrice = na
 var float atrStopSize = na
 
+// Variables pour signaux visuels de gestion des sorties
+var bool showBreakEvenLong = false
+var bool showBreakEvenShort = false
+var bool showTakeProfitLong = false
+var bool showTakeProfitShort = false
+var bool showStopLossLong = false
+var bool showStopLossShort = false
+
+// Réinitialiser les signaux visuels
+showBreakEvenLong := false
+showBreakEvenShort := false
+showTakeProfitLong := false
+showTakeProfitShort := false
+showStopLossLong := false
+showStopLossShort := false
+
 // Logique d'entrée améliorée avec gestion des stops plus efficace
 if (buy and strategy.position_size <= 0)
     entryPrice := close
@@ -116,12 +132,12 @@ if (strategy.position_size > 0) // En position Long
     if (unrealizedProfit >= breakEvenLevel and stopLossPrice < entryPrice)
         stopLossPrice := entryPrice
         strategy.exit("Long BE", "Long", stop=stopLossPrice, limit=takeProfitPrice)
-        plotshape(true, title="Break Even", text="BE", style=shape.labelup, location=location.bottom, color=color.new(color.yellow, 0), textcolor=color.new(color.black, 0), size=size.tiny)
+        showBreakEvenLong := true
     
     // Take profit when target is reached (manual check for extra security)
     if (unrealizedProfit >= takeProfit)
         strategy.close("Long", comment="TP Target Reached")
-        plotshape(true, title="Take Profit", text="TP", style=shape.labelup, location=location.bottom, color=color.new(color.blue, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+        showTakeProfitLong := true
 
 if (strategy.position_size < 0) // En position Short
     // Calcul des profits latents
@@ -131,21 +147,29 @@ if (strategy.position_size < 0) // En position Short
     if (unrealizedProfit >= breakEvenLevel and stopLossPrice > entryPrice)
         stopLossPrice := entryPrice
         strategy.exit("Short BE", "Short", stop=stopLossPrice, limit=takeProfitPrice)
-        plotshape(true, title="Break Even", text="BE", style=shape.labeldown, location=location.top, color=color.new(color.yellow, 0), textcolor=color.new(color.black, 0), size=size.tiny)
+        showBreakEvenShort := true
     
     // Take profit when target is reached (manual check for extra security)
     if (unrealizedProfit >= takeProfit)
         strategy.close("Short", comment="TP Target Reached")
-        plotshape(true, title="Take Profit", text="TP", style=shape.labeldown, location=location.top, color=color.new(color.blue, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+        showTakeProfitShort := true
 
 // Vérification forcée des stops loss toutes les barres (pour s'assurer qu'ils se déclenchent)
 if (strategy.position_size > 0 and close < stopLossPrice)
     strategy.close("Long", comment="SL Forced")
-    plotshape(true, title="Stop Loss", text="SL", style=shape.labelup, location=location.bottom, color=color.new(color.red, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+    showStopLossLong := true
 
 if (strategy.position_size < 0 and close > stopLossPrice)
     strategy.close("Short", comment="SL Forced")
-    plotshape(true, title="Stop Loss", text="SL", style=shape.labeldown, location=location.top, color=color.new(color.red, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+    showStopLossShort := true
+
+// Dessiner les signaux visuels en dehors des blocs conditionnels
+plotshape(showBreakEvenLong, title="Break Even Long", text="BE", style=shape.labelup, location=location.bottom, color=color.new(color.yellow, 0), textcolor=color.new(color.black, 0), size=size.tiny)
+plotshape(showBreakEvenShort, title="Break Even Short", text="BE", style=shape.labeldown, location=location.top, color=color.new(color.yellow, 0), textcolor=color.new(color.black, 0), size=size.tiny)
+plotshape(showTakeProfitLong, title="Take Profit Long", text="TP", style=shape.labelup, location=location.bottom, color=color.new(color.blue, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+plotshape(showTakeProfitShort, title="Take Profit Short", text="TP", style=shape.labeldown, location=location.top, color=color.new(color.blue, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+plotshape(showStopLossLong, title="Stop Loss Long", text="SL", style=shape.labelup, location=location.bottom, color=color.new(color.red, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+plotshape(showStopLossShort, title="Stop Loss Short", text="SL", style=shape.labeldown, location=location.top, color=color.new(color.red, 0), textcolor=color.new(color.white, 0), size=size.tiny)
 
 // Plot trailing stop for visualization
 plot(xATRTrailingStop, title='ATR Trailing Stop', color=xcolor, linewidth=2)
