@@ -1,0 +1,165 @@
+//@version=5
+strategy(title='UT Bot Strategy Optimisée avec Gestion Avancée des Sorties', overlay=true, initial_capital=1000000, default_qty_type=strategy.percent_of_equity, default_qty_value=1, commission_type=strategy.commission.percent, commission_value=0.1)
+
+// Inputs
+a = input(7, title='Key Value. \'This changes the sensitivity\'')
+c = input(1, title='ATR Period')
+h = input(false, title='Signals from Heikin Ashi Candles')
+totalCapital = input(1000000, title='Total Capital')  // Input for total capital
+
+// Inputs pour les filtres horaires et DMI/ADX
+startHour = input(8, title='Heure de début de trading')
+endHour = input(20, title='Heure de fin de trading')
+adxPeriod = input(14, title='Période ADX')
+adxThreshold = input(15, title='Seuil ADX')
+diPeriod = input(14, title='Période DI')
+
+// Nouveaux inputs pour la gestion avancée des sorties
+takeProfit = input.float(3.0, title='Take Profit Multiplier (x ATR Stop Size)', minval=1.0, step=0.5)
+breakEvenLevel = input.float(2.0, title='Break Even Level Multiplier (x ATR Stop Size)', minval=1.0, step=0.5)
+
+// Déterminer si l'heure actuelle est dans la plage de trading
+isWithinTradingHours() =>
+    time_hour = hour(time)
+    time_hour >= startHour and time_hour < endHour
+
+// Calculer DMI et ADX
+[diplus, diminus, adx] = ta.dmi(diPeriod, adxPeriod)
+
+// Filtres de trading
+longFilter = adx > adxThreshold and diplus > diminus and isWithinTradingHours()
+shortFilter = adx > adxThreshold and diminus > diplus and isWithinTradingHours()
+
+// Calculate ATR
+xATR = ta.atr(c)
+nLoss = a * xATR
+
+// Use Heikin Ashi close if selected
+src = h ? request.security(ticker.heikinashi(syminfo.tickerid), timeframe.period, close, lookahead=barmerge.lookahead_off) : close
+
+// Calculate ATR Trailing Stop
+var float xATRTrailingStop = na
+iff_1 = src > nz(xATRTrailingStop[1], 0) ? src - nLoss : src + nLoss
+iff_2 = src < nz(xATRTrailingStop[1], 0) and src[1] < nz(xATRTrailingStop[1], 0) ? math.min(nz(xATRTrailingStop[1]), src + nLoss) : iff_1
+xATRTrailingStop := src > nz(xATRTrailingStop[1], 0) and src[1] > nz(xATRTrailingStop[1], 0) ? math.max(nz(xATRTrailingStop[1]), src - nLoss) : iff_2
+
+// Determine Position
+var int pos = na
+iff_3 = src[1] > nz(xATRTrailingStop[1], 0) and src < nz(xATRTrailingStop[1], 0) ? -1 : nz(pos[1], 0)
+pos := src[1] < nz(xATRTrailingStop[1], 0) and src > nz(xATRTrailingStop[1], 0) ? 1 : iff_3
+
+xcolor = pos == -1 ? color.red : pos == 1 ? color.green : color.blue
+
+ema = ta.ema(src, 1)
+above = ta.crossover(ema, xATRTrailingStop)
+below = ta.crossover(xATRTrailingStop, ema)
+
+// Signaux d'origine avec nouveaux filtres
+buy = src > xATRTrailingStop and above and longFilter
+sell = src < xATRTrailingStop and below and shortFilter
+
+// Calculate position size for Mini Dow Jones futures
+pointValue = 5  // Value of one point for Mini Dow Jones futures
+riskPerTrade = 0.001 * totalCapital  // 0.1% of total capital for each trade
+positionSize = riskPerTrade / (nLoss * pointValue)  // Number of contracts based on risk per trade and ATR-based stop loss
+positionSize := positionSize < 1 ? 1 : positionSize  // Ensure position size is at least 1 contract
+
+// Plot Buy and Sell Signals
+plotshape(buy, title='Buy', text='Buy', style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+plotshape(sell, title='Sell', text='Sell', style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+
+// Afficher les indicateurs DMI et ADX pour le débogage
+plotchar(adx > adxThreshold, title="ADX > Threshold", char="✓", color=color.green, location=location.top)
+plotchar(diplus > diminus, title="DI+ > DI-", char="L", color=color.green, location=location.top)
+plotchar(diminus > diplus, title="DI- > DI+", char="S", color=color.red, location=location.top)
+plotchar(isWithinTradingHours(), title="Trading Hours", char="H", color=color.blue, location=location.top)
+
+// Variables pour stocker les informations sur les trades
+var float entryPrice = na
+var float stopLossPrice = na
+var float takeProfitPrice = na
+var float breakEvenStopPrice = na
+var float atrStopSize = na
+
+// Logique d'entrée améliorée avec gestion des stops plus efficace
+if (buy and strategy.position_size <= 0)
+    entryPrice := close
+    atrStopSize := nLoss
+    stopLossPrice := close - 3 * xATR
+    takeProfitPrice := close + (3 * xATR) * takeProfit
+    breakEvenStopPrice := close
+    strategy.entry("Long", strategy.long, qty=positionSize)
+    strategy.exit("Long Exit", "Long", stop=stopLossPrice, limit=takeProfitPrice)
+
+if (sell and strategy.position_size >= 0)
+    entryPrice := close
+    atrStopSize := nLoss
+    stopLossPrice := close + 3 * xATR
+    takeProfitPrice := close - (3 * xATR) * takeProfit
+    breakEvenStopPrice := close
+    strategy.entry("Short", strategy.short, qty=positionSize)
+    strategy.exit("Short Exit", "Short", stop=stopLossPrice, limit=takeProfitPrice)
+
+// Close positions when opposite signal appears
+if (sell and strategy.position_size > 0)
+    strategy.close("Long", comment="Close Long on Short Signal")
+
+if (buy and strategy.position_size < 0)
+    strategy.close("Short", comment="Close Short on Long Signal")
+
+// Gestion des stops avancée pendant la position
+if (strategy.position_size > 0) // En position Long
+    // Calcul des profits latents
+    unrealizedProfit = (close - entryPrice) / atrStopSize
+    
+    // Move to break even when profit reaches breakEvenLevel
+    if (unrealizedProfit >= breakEvenLevel and stopLossPrice < entryPrice)
+        stopLossPrice := entryPrice
+        strategy.exit("Long BE", "Long", stop=stopLossPrice, limit=takeProfitPrice)
+        plotshape(true, title="Break Even", text="BE", style=shape.labelup, location=location.bottom, color=color.new(color.yellow, 0), textcolor=color.new(color.black, 0), size=size.tiny)
+    
+    // Take profit when target is reached (manual check for extra security)
+    if (unrealizedProfit >= takeProfit)
+        strategy.close("Long", comment="TP Target Reached")
+        plotshape(true, title="Take Profit", text="TP", style=shape.labelup, location=location.bottom, color=color.new(color.blue, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+
+if (strategy.position_size < 0) // En position Short
+    // Calcul des profits latents
+    unrealizedProfit = (entryPrice - close) / atrStopSize
+    
+    // Move to break even when profit reaches breakEvenLevel
+    if (unrealizedProfit >= breakEvenLevel and stopLossPrice > entryPrice)
+        stopLossPrice := entryPrice
+        strategy.exit("Short BE", "Short", stop=stopLossPrice, limit=takeProfitPrice)
+        plotshape(true, title="Break Even", text="BE", style=shape.labeldown, location=location.top, color=color.new(color.yellow, 0), textcolor=color.new(color.black, 0), size=size.tiny)
+    
+    // Take profit when target is reached (manual check for extra security)
+    if (unrealizedProfit >= takeProfit)
+        strategy.close("Short", comment="TP Target Reached")
+        plotshape(true, title="Take Profit", text="TP", style=shape.labeldown, location=location.top, color=color.new(color.blue, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+
+// Vérification forcée des stops loss toutes les barres (pour s'assurer qu'ils se déclenchent)
+if (strategy.position_size > 0 and close < stopLossPrice)
+    strategy.close("Long", comment="SL Forced")
+    plotshape(true, title="Stop Loss", text="SL", style=shape.labelup, location=location.bottom, color=color.new(color.red, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+
+if (strategy.position_size < 0 and close > stopLossPrice)
+    strategy.close("Short", comment="SL Forced")
+    plotshape(true, title="Stop Loss", text="SL", style=shape.labeldown, location=location.top, color=color.new(color.red, 0), textcolor=color.new(color.white, 0), size=size.tiny)
+
+// Plot trailing stop for visualization
+plot(xATRTrailingStop, title='ATR Trailing Stop', color=xcolor, linewidth=2)
+
+// Plot DMI and ADX for reference
+plot(adx, title="ADX", color=color.yellow, linewidth=2)
+plot(diplus, title="DI+", color=color.green, linewidth=1)
+plot(diminus, title="DI-", color=color.red, linewidth=1)
+hline(adxThreshold, title="ADX Threshold", color=color.white, linestyle=hline.style_dotted)
+
+// Plot stop loss and take profit levels when in position
+plot(strategy.position_size != 0 ? stopLossPrice : na, title="Stop Loss", color=color.red, style=plot.style_cross, linewidth=2)
+plot(strategy.position_size != 0 ? takeProfitPrice : na, title="Take Profit", color=color.blue, style=plot.style_cross, linewidth=2)
+
+// Alerts
+alertcondition(buy, title='UT Long', message='UT Long')
+alertcondition(sell, title='UT Short', message='UT Short')
